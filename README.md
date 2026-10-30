@@ -13,13 +13,16 @@ This is a focused continuation of the collaborative Luke-os project. See
 
 ## Included
 
-- **Memory desk:** add notes, review timestamped screen observations and summaries.
+- **Memory desk:** a light workspace with timestamped cards, source filters,
+  readable long memories, and a focused note editor.
 - **Search:** SQLite FTS5 retrieval across saved titles and memory content.
 - **Recall chat:** relevant records are supplied to the model and shown alongside
   its answer. Reference markers are model-generated, not independently verified citations.
 - **Summaries:** summarize recent memories on demand; an active recording session
   also summarizes accumulated observations about every two minutes.
-- **Tasks:** add a task and mark it complete by stable ID.
+- **Tasks:** add a task, mark it complete by stable ID, and see the pending count.
+- **Quick navigation:** Cmd/Ctrl+K focuses search; Cmd/Ctrl+N opens a new note.
+  The layout adapts to narrow windows, and recall chat shows a pending response state.
 - **Optional screen memory:** one-shot or periodic primary-screen observations;
   unchanged screens are skipped. Raw images are transient, not stored on disk.
 
