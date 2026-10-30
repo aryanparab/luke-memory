@@ -2,8 +2,9 @@
 
 **A second brain with a smaller job: remember, retrieve, and help you follow up.**
 
-A focused desktop memory assistant with a searchable timeline, factual summaries,
-chat grounded in retrieved records, and lightweight tasks. Screen recording is
+An always-on-top Electron companion: a small draggable widget stays on your
+screen, and clicking it opens an anchored chat panel. Recall saved memories,
+add notes, and manage lightweight tasks without opening a separate chat window. Screen recording is
 off on launch and can only start through an explicit user action.
 
 ![Luke Memory desk with a synthetic record and local recall answer](docs/preview.png)
@@ -13,7 +14,10 @@ This is a focused continuation of the collaborative Luke-os project. See
 
 ## Included
 
-- **Memory desk:** a light workspace with timestamped cards, source filters,
+- **Desktop companion:** click the floating widget to chat; click away or press
+  Escape to tuck chat away. Cmd/Ctrl+Shift+Space toggles chat from any app. Drag
+  the widget to reposition it; its position is remembered across launches.
+- **Memory desk (optional library):** a light workspace with timestamped cards, source filters,
   readable long memories, and a focused note editor.
 - **Search:** SQLite FTS5 retrieval across saved titles and memory content.
 - **Recall chat:** relevant records are supplied to the model and shown alongside
@@ -45,9 +49,12 @@ cp .env.example .env
 npm start
 ```
 
-The backend binds to **127.0.0.1:5051**. The Electron window opens it, and a browser
-can also use http://localhost:5051. The launcher starts its own backend when needed
-and stops that process when the desktop app exits. It never starts screen capture.
+The backend binds to **127.0.0.1:5051**. Electron starts with only the floating
+widget visible; chat stays hidden until requested. Use the panel’s library button
+or the menu-bar/tray menu to open the full memory library. Quit Luke through the
+tray menu. The launcher starts its own backend when needed and stops only that
+process on exit; an already running backend is reused. It never starts capture.
+Browser access at http://localhost:5051 is an optional development preview.
 For backend-only development:
 
 ```sh
@@ -74,7 +81,7 @@ To enable capture controls, set `LUKE_ALLOW_CAPTURE=1` in `.env` or run:
 npm run capture
 ```
 
-Then use **Capture once** or **Start recording** in the UI. macOS may require Screen
+Then open the optional memory library and use **Capture once** or **Start recording**. macOS may require Screen
 Recording permission for the process performing capture. Pause stops future
 captures; an in-flight model request may still finish. Full screen capture and
 OS permission flows are not exercised by the automated tests.
@@ -98,7 +105,7 @@ remote host sends content to that host. Never commit keys or personal memory dat
 ## Architecture
 
 ```text
-Electron shell / browser UI
+Electron widget → anchored chat / optional memory library
            │ same-origin local HTTP
            ▼
        Flask API ──────────► SQLite: memories + FTS5 + tasks
@@ -124,7 +131,8 @@ npm run check
 Tests cover persistence across store instances, full-text retrieval, task IDs,
 retrieved chat context, empty memory, model failure recovery, summary persistence,
 input validation, local-host/origin restrictions, and capture being off by default.
-The 10 automated tests use synthetic records and a fake provider; they do not
+Four desktop geometry tests also cover screen edges, secondary monitors, and
+offscreen saved positions. The 10 Python tests use synthetic records and a fake provider; they do not
 capture a screen. A separate local smoke check verified a real Ollama recall answer
 from a synthetic saved note. Screen capture and OS permission flows remain untested.
 

@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "capture": "LUKE_ALLOW_CAPTURE=1 electron .",
-    "check": "node --check desktop/main.cjs && node --check ui/app.js"
+    "check": "node --check desktop/main.cjs && node --check desktop/preload.cjs && node --check ui/app.js && node --check ui/widget.js && node --check ui/panel.js && node --test tests/desktop.test.cjs"
   },
   "devDependencies": {
     "electron": "45.1.0"
