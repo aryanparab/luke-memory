@@ -9,7 +9,7 @@ class Models:
         if self.provider not in ('ollama', 'groq'):
             raise ValueError('LUKE_PROVIDER must be ollama or groq')
         self.base = os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/')
-        self.text_model = os.getenv('LUKE_TEXT_MODEL', 'gemma3:4b' if self.provider == 'ollama' else 'openai/gpt-oss-20b')
+        self.text_model = os.getenv('LUKE_TEXT_MODEL', 'gemma2:2b' if self.provider == 'ollama' else 'openai/gpt-oss-20b')
         self.vision_model = os.getenv('LUKE_VISION_MODEL', 'gemma3:4b')
 
     def chat(self, messages):
@@ -21,7 +21,7 @@ class Models:
         else:
             response = requests.post(self.base + '/api/chat', json={
                 'model': self.text_model, 'messages': messages, 'stream': False,
-                'options': {'temperature': 0.2, 'num_predict': 600}}, timeout=90)
+                'options': {'temperature': 0.2, 'num_predict': 240, 'num_ctx': 8192}}, timeout=(5, 180))
             response.raise_for_status()
             text = response.json()['message']['content']
         if not text or not text.strip():

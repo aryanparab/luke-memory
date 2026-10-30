@@ -51,16 +51,18 @@ class MemoryTests(unittest.TestCase):
         result = self.post('/api/chat', {'message':'When is the launch review?'})
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json['sources'][0]['id'], memory['id'])
-        self.assertIn('Friday', self.models.messages[-1]['content'])
-    def test_empty_chat_does_not_call_model(self):
+        self.assertTrue(any('Friday' in row['content'] for row in self.models.messages))
+    def test_empty_chat_still_allows_conversation(self):
         result = self.post('/api/chat', {'message':'What did I do?'})
-        self.assertIn('empty', result.json['answer'])
-        self.assertEqual(self.models.messages, [])
+        self.assertEqual(result.status_code, 200)
+        self.assertTrue(self.models.messages)
+        self.assertEqual(result.json['sources'], [])
     def test_provider_failure_keeps_memories(self):
         self.note()
         with patch.object(self.models, 'chat', side_effect=RuntimeError('offline')):
             self.assertEqual(self.post('/api/chat', {'message':'Review'}).status_code, 502)
         self.assertEqual(len(self.get('/api/memories').json['memories']), 1)
+        self.assertEqual(self.get('/api/chat/history').json['messages'][0]['content'], 'Review')
     def test_summary_is_searchable_and_persisted(self):
         self.note()
         result = self.post('/api/summarize', {})
@@ -78,3 +80,28 @@ class MemoryTests(unittest.TestCase):
     def test_validation_rejects_empty_or_oversized_notes(self):
         self.assertEqual(self.post('/api/memories', {'title':' ', 'content':'x'}).status_code, 400)
         self.assertEqual(self.post('/api/memories', {'title':'x', 'content':'x'*12001}).status_code, 400)
+
+    def test_greetings_are_saved_without_irrelevant_sources(self):
+        self.note()
+        result = self.post('/api/chat', {'message':'Hi'})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json['sources'], [])
+        self.assertEqual(self.models.messages, [])
+        history = self.get('/api/chat/history').json['messages']
+        self.assertEqual([row['role'] for row in history], ['user', 'assistant'])
+        self.assertEqual(len(Store(Path(self.temp.name) / 'memory.sqlite3').history()), 2)
+
+    def test_followup_context_survives_new_app(self):
+        self.post('/api/chat', {'message':'My project is called Atlas'})
+        with patch.dict('os.environ', {'LUKE_ALLOW_CAPTURE':'0', 'LUKE_PORT':'5051'}):
+            restarted = create_app(self.temp.name, self.models).test_client()
+        result = restarted.post('/api/chat', json={'message':'What is it called?'}, base_url=BASE)
+        self.assertEqual(result.status_code, 200)
+        self.assertTrue(any(row['content']=='My project is called Atlas' for row in self.models.messages))
+        self.assertEqual(len(self.get('/api/chat/history').json['messages']), 4)
+
+    def test_uncited_memories_are_not_displayed_as_sources(self):
+        self.note()
+        with patch.object(self.models, 'chat', return_value='I do not have that detail.'):
+            result = self.post('/api/chat', {'message':'unknown fact'})
+        self.assertEqual(result.json['sources'], [])

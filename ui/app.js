@@ -50,7 +50,7 @@ async function loadStatus() {
   $('capture-once').disabled = !status.capture_allowed;
   $('capture-toggle').disabled = !status.capture_allowed;
   $('capture-once').title = $('capture-toggle').title = status.capture_allowed ? '' : 'To enable screen capture controls, relaunch with npm run capture.';
-  $('capture-hint').textContent = status.capture_error || (status.capture_allowed ? 'Images are processed by local Ollama; only extracted text is saved.' : 'Capture is paused. Your notes and memories are always available.');
+  $('capture-hint').textContent = status.capture_error || (status.capture_allowed ? 'Screen text is extracted locally; only text is saved.' : 'Capture is paused. Your notes and memories are always available.');
 }
 for (const button of document.querySelectorAll('[data-view]')) button.onclick = () => {
   document.querySelectorAll('[data-view]').forEach(node=>node.classList.toggle('active',node===button));
@@ -62,13 +62,20 @@ $('add-note').onclick=openNote; $('close-note').onclick=()=>$('note-dialog').clo
 $('note-form').onsubmit=async event=>{event.preventDefault();clearError();const submit=event.target.querySelector('button.primary');submit.disabled=true;try {await api('/api/memories',{title:$('note-title').value,content:$('note-content').value});$('note-dialog').close();event.target.reset();sourceFilter='all';document.querySelectorAll('[data-source]').forEach(node=>{node.classList.toggle('selected',node.dataset.source==='all');node.setAttribute('aria-pressed',String(node.dataset.source==='all'));});await loadMemories();}catch(exc){error(exc);}finally{submit.disabled=false;}};
 $('task-form').onsubmit=async event=>{event.preventDefault();clearError();try {await api('/api/tasks',{title:$('task-title').value});event.target.reset();await loadTasks();}catch(exc){error(exc);}};
 $('search-form').onsubmit=event=>{event.preventDefault();clearError();loadMemories().catch(error);};
-$('chat-form').onsubmit=async event=>{event.preventDefault();clearError();const question=$('question').value.trim();if(!question)return;$('messages').append(element('div',question,'message user'));$('question').value='';$('send-chat').disabled=true;const pending=element('div','Finding the thread…','message assistant is-thinking');$('messages').append(pending);try{const data=await api('/api/chat',{message:question});const answer=element('div',data.answer,'message assistant');data.sources.forEach((source,i)=>answer.append(element('small',`[${i+1}] ${source.title} · ${time(source.created_at)}`)));$('messages').append(answer);}catch(exc){error(exc);$('messages').append(element('div',exc.message,'message assistant'));}finally{pending.remove();$('send-chat').disabled=false;$('messages').scrollTop=$('messages').scrollHeight;}};
+$('chat-form').onsubmit=async event=>{event.preventDefault();clearError();const question=$('question').value.trim();if(!question||$('send-chat').disabled)return;$('messages').append(element('div',question,'message user'));$('question').value='';$('send-chat').disabled=true;const pending=element('div','Finding the thread…','message assistant is-thinking');$('messages').append(pending);try{const data=await api('/api/chat',{message:question});const answer=element('div',data.answer,'message assistant');data.sources.forEach((source,i)=>answer.append(element('small',`[${source.number||i+1}] ${source.title} · ${time(source.created_at)}`)));$('messages').append(answer);}catch(exc){error(exc);$('messages').append(element('div',exc.message,'message assistant'));}finally{pending.remove();$('send-chat').disabled=false;$('messages').scrollTop=$('messages').scrollHeight;}};
 async function captureAction(action) {clearError();try{await api('/api/capture',{action});await loadStatus();await loadMemories();}catch(exc){error(exc);}}
-$('capture-toggle').onclick=()=>{if(status.capture_running)captureAction('stop');else if(confirm('Start capturing your primary screen every 30 seconds? Images go to local Ollama and extracted text is saved locally. Pause any time.'))captureAction('start');};
-$('capture-once').onclick=async()=>{if(!confirm('Capture your primary screen once and send the image to local Ollama? Extracted text will be saved.'))return;$('capture-once').disabled=true;await captureAction('once');$('capture-once').disabled=!status.capture_allowed;};
+$('capture-toggle').onclick=()=>{if(status.capture_running)captureAction('stop');else if(confirm('Start capturing your primary screen every 30 seconds? Text is extracted with local OCR and saved locally. Pause any time.'))captureAction('start');};
+$('capture-once').onclick=async()=>{if(!confirm('Read your primary screen once with local OCR? Extracted text will be saved locally.'))return;$('capture-once').disabled=true;await captureAction('once');$('capture-once').disabled=!status.capture_allowed;};
 $('summarize').onclick=async()=>{clearError();$('summarize').disabled=true;try{await api('/api/summarize',{});await loadMemories();}catch(exc){error(exc);}finally{$('summarize').disabled=false;}};
 document.querySelectorAll('[data-source]').forEach(button=>button.onclick=()=>{ sourceFilter=button.dataset.source; document.querySelectorAll('[data-source]').forEach(node=>(node.classList.toggle('selected',node===button),node.setAttribute('aria-pressed',String(node===button)))); loadMemories().catch(error); });
 document.querySelectorAll('[data-prompt]').forEach(button=>button.onclick=()=>{ $('question').value=button.dataset.prompt; $('question').focus(); });
 document.addEventListener('keydown',event=>{if(!(event.metaKey||event.ctrlKey))return;if(event.key.toLowerCase()==='k'){event.preventDefault();document.querySelector('[data-view=memory]').click();$('search').focus();}if(event.key.toLowerCase()==='n'){event.preventDefault();openNote();}});
 Promise.all([loadStatus(),loadMemories(),loadTasks()]).catch(error);
 setInterval(()=>{loadStatus().catch(error);if(status.capture_running)loadMemories().catch(error);},10000);
+
+async function restoreChat(){
+  $('send-chat').disabled=true;
+  try{const data=await api('/api/chat/history');if(data.messages.length){$('messages').replaceChildren();for(const row of data.messages){const message=element('div',row.content,'message '+(row.role==='user'?'user':'assistant'));for(const source of row.sources)message.append(element('small',`[${source.number}] ${source.title} · ${time(source.created_at)}`));$('messages').append(message);}$('messages').scrollTop=$('messages').scrollHeight;}}
+  catch(exc){error(exc);}finally{$('send-chat').disabled=false;}
+}
+restoreChat();

@@ -4,8 +4,8 @@
 
 An always-on-top Electron companion: a small draggable widget stays on your
 screen, and clicking it opens an anchored chat panel. Recall saved memories,
-add notes, and manage lightweight tasks without opening a separate chat window. Screen recording is
-off on launch and can only start through an explicit user action.
+add notes, and manage lightweight tasks without opening a separate chat window. Screen collection is opt-in. It starts paused by default; explicitly setting
+`LUKE_AUTO_CAPTURE=1` with `LUKE_ALLOW_CAPTURE=1` enables collection on launch.
 
 ![Luke Memory desk with a synthetic record and local recall answer](docs/preview.png)
 
@@ -20,15 +20,23 @@ This is a focused continuation of the collaborative Luke-os project. See
 - **Memory desk (optional library):** a light workspace with timestamped cards, source filters,
   readable long memories, and a focused note editor.
 - **Search:** SQLite FTS5 retrieval across saved titles and memory content.
-- **Recall chat:** relevant records are supplied to the model and shown alongside
-  its answer. Reference markers are model-generated, not independently verified citations.
-- **Summaries:** summarize recent memories on demand; an active recording session
-  also summarizes accumulated observations about every two minutes.
+- **Text agent with memory:** ordinary conversation works without saved records.
+  Chat turns persist in SQLite and recent turns are restored after restart. Relevant
+  records ground personal recall; only cited records appear under an answer.
+  Reference markers are model-generated, not independently verified citations.
+- **Compaction:** summarize new records on demand. Collection checks about every
+  two minutes and completed chats also trigger compaction once four records are
+  pending. Each summary tracks its covered inputs atomically, preventing repeated
+  summarization of the same batch. Original records and the full chat transcript
+  remain available; this reduces prompt context, not disk storage.
 - **Tasks:** add a task, mark it complete by stable ID, and see the pending count.
 - **Quick navigation:** Cmd/Ctrl+K focuses search; Cmd/Ctrl+N opens a new note.
   The layout adapts to narrow windows, and recall chat shows a pending response state.
-- **Optional screen memory:** one-shot or periodic primary-screen observations;
-  unchanged screens are skipped. Raw images are transient, not stored on disk.
+- **Optional screen memory:** macOS Vision OCR extracts primary-screen text locally
+  every 30 seconds, without a vision LLM. Durable pixel hashes skip identical
+  screens across restarts; a visual-difference check tolerates tiny changes, and
+  normalized text hashes suppress repeated extracted text. Raw images are transient.
+  The quick panel shows collection status, memory count and duplicate skips.
 
 There are no stress scores, webcam/emotion analysis, clipboard interception,
 keyboard/mouse tracking, productivity scoring, focus enforcement, voice coaching,
@@ -46,6 +54,8 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.lock
 npm ci
 cp .env.example .env
+# macOS: compile the local OCR helper (requires Apple command-line tools)
+npm run setup:ocr
 npm start
 ```
 
@@ -63,28 +73,28 @@ For backend-only development:
 
 ### Local models
 
-Install Ollama and pull a vision-capable model such as the configured default:
+Install Ollama and pull the text model:
 
 ```sh
-ollama pull gemma3:4b
+ollama pull gemma2:2b
 ollama serve
 ```
 
-Omit `ollama serve` if the Ollama app is already running. The default text and
-vision provider is local Ollama. Model downloads require network access; model
-inference needs sufficient memory and can be slow on CPU. Notes, search, and tasks
-work without a model server.
+Omit `ollama serve` if the Ollama app is already running. Text inference is local
+by default. Screen extraction uses Apple's local Vision OCR through the compiled
+helper, **not** a generative vision model. OCR may miss text and does not describe
+images or diagrams. Only the primary display is collected.
 
-To enable capture controls, set `LUKE_ALLOW_CAPTURE=1` in `.env` or run:
+Set `LUKE_ALLOW_CAPTURE=1` in your private `.env`, then use **Start memory** in the
+widget panel (or recording controls in the library). To explicitly opt into
+collection at every launch, also set `LUKE_AUTO_CAPTURE=1`. Pause with **Pause
+memory**. Screen Recording permission is required for the backend process; a
+capture already in flight may finish after pausing.
 
-```sh
-npm run capture
-```
-
-Then open the optional memory library and use **Capture once** or **Start recording**. macOS may require Screen
-Recording permission for the process performing capture. Pause stops future
-captures; an in-flight model request may still finish. Full screen capture and
-OS permission flows are not exercised by the automated tests.
+Optional `LUKE_EXTRACTOR=vision` retains the earlier Ollama vision path and needs
+an installed vision-capable model matching `LUKE_VISION_MODEL`, e.g. `gemma3:4b`.
+The OCR default currently supports macOS; other systems require this explicit
+vision path. No images go to a cloud provider.
 
 ### Optional Groq text provider
 
@@ -111,7 +121,7 @@ Electron widget → anchored chat / optional memory library
        Flask API ──────────► SQLite: memories + FTS5 + tasks
            │
            ├── text chat / summary ──► Ollama (default) or Groq (explicit)
-           └── opt-in screen capture ──► local Ollama vision
+           └── opt-in screen capture ──► macOS OCR (default) / local Ollama vision
 ```
 
 Data lives in `.data/memory.sqlite3` by default. Set `LUKE_DATA_DIR` to another
@@ -128,13 +138,13 @@ public backend.
 npm run check
 ```
 
-Tests cover persistence across store instances, full-text retrieval, task IDs,
-retrieved chat context, empty memory, model failure recovery, summary persistence,
-input validation, local-host/origin restrictions, and capture being off by default.
-Four desktop geometry tests also cover screen edges, secondary monitors, and
-offscreen saved positions. The 10 Python tests use synthetic records and a fake provider; they do not
-capture a screen. A separate local smoke check verified a real Ollama recall answer
-from a synthetic saved note. Screen capture and OS permission flows remain untested.
+Twenty Python regressions cover persistence, conversation restoration, follow-up
+context, source filtering, task IDs, extraction retries, exact/near/text duplicate
+suppression, duplicate detection after restart, compaction input coverage and
+failure recovery, validation and local request restrictions. Four Node tests cover
+widget placement across monitor boundaries. Automated capture tests use generated
+images and fake extractors, never private screen contents. A separate native OCR
+fixture verifies Apple's text recognition on generated text.
 
 ## Repository layout
 
@@ -142,7 +152,8 @@ from a synthetic saved note. Screen capture and OS permission flows remain untes
 backend/app.py       Local routes and request validation
 backend/store.py     Transactional SQLite and FTS5
 backend/models.py    Explicit local/cloud model adapters
-backend/capture.py   Opt-in capture loop and summaries
+backend/capture.py   Opt-in OCR capture, durable dedup and compaction
+backend/ocr.swift    Local macOS text-recognition helper
 desktop/main.cjs     Sandboxed Electron shell and backend lifecycle
 ui/                 Plain HTML/CSS/JS memory desk, chat and tasks
 tests/              Synthetic local regression tests

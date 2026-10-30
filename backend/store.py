@@ -20,6 +20,14 @@ class Store:
                     id TEXT PRIMARY KEY, created_at TEXT NOT NULL, title TEXT NOT NULL,
                     content TEXT NOT NULL, source TEXT NOT NULL);
                 CREATE VIRTUAL TABLE IF NOT EXISTS memory_search USING fts5(id UNINDEXED, title, content);
+                CREATE TABLE IF NOT EXISTS observations (
+                    fingerprint TEXT PRIMARY KEY, memory_id TEXT, last_seen TEXT NOT NULL,
+                    seen_count INTEGER NOT NULL DEFAULT 1);
+                CREATE TABLE IF NOT EXISTS summary_inputs (
+                    memory_id TEXT PRIMARY KEY, summary_id TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS conversation (
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL,
+                    content TEXT NOT NULL, created_at TEXT NOT NULL, sources TEXT NOT NULL DEFAULT '[]');
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY, title TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL, completed_at TEXT);
@@ -70,3 +78,54 @@ class Store:
         with self.connect() as db:
             updated = db.execute('UPDATE tasks SET done=1, completed_at=? WHERE id=? AND done=0', (now(), task_id))
         return updated.rowcount == 1
+
+    def observation_seen(self, fingerprint):
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM observations WHERE fingerprint=?', (fingerprint,)).fetchone()
+            if not row:
+                return False
+            db.execute('UPDATE observations SET last_seen=?,seen_count=seen_count+1 WHERE fingerprint=?', (now(), fingerprint))
+            return True
+
+    def remember_observation(self, fingerprint, memory_id=None):
+        with self.connect() as db:
+            db.execute('INSERT OR IGNORE INTO observations(fingerprint,memory_id,last_seen) VALUES (?,?,?)',
+                       (fingerprint, memory_id, now()))
+
+    def uncompacted(self, limit=20):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("""SELECT m.* FROM memories m
+                LEFT JOIN summary_inputs s ON s.memory_id=m.id
+                WHERE s.memory_id IS NULL AND m.source!='summary'
+                ORDER BY m.created_at ASC LIMIT ?""", (limit,))]
+
+    def save_summary(self, text, records):
+        # Summary and input coverage commit together; originals remain available.
+        record = dict(id=uuid.uuid4().hex, created_at=now(), title='Memory summary', content=text, source='summary')
+        with self.connect() as db:
+            db.execute('INSERT INTO memories VALUES (:id,:created_at,:title,:content,:source)', record)
+            db.execute('INSERT INTO memory_search VALUES (:id,:title,:content)', record)
+            for row in records:
+                db.execute('INSERT INTO summary_inputs VALUES (?,?)', (row['id'], record['id']))
+        return record
+
+    def add_message(self, role, content, sources=None):
+        import json
+        with self.connect() as db:
+            db.execute('INSERT INTO conversation(role,content,created_at,sources) VALUES (?,?,?,?)',
+                       (role, content, now(), json.dumps(sources or [])))
+
+    def history(self, limit=40):
+        import json
+        with self.connect() as db:
+            rows = db.execute('SELECT * FROM (SELECT * FROM conversation ORDER BY seq DESC LIMIT ?) ORDER BY seq', (limit,))
+            return [dict(row, sources=json.loads(row['sources'])) for row in rows]
+
+    def stats(self):
+        with self.connect() as db:
+            return dict(memory_count=db.execute('SELECT COUNT(*) FROM memories').fetchone()[0],
+                        conversation_messages=db.execute('SELECT COUNT(*) FROM conversation').fetchone()[0],
+                        compacted_records=db.execute('SELECT COUNT(*) FROM summary_inputs').fetchone()[0],
+                        pending_compaction=db.execute("SELECT COUNT(*) FROM memories WHERE source!='summary' AND id NOT IN (SELECT memory_id FROM summary_inputs)").fetchone()[0],
+                        observations=db.execute('SELECT COUNT(*) FROM observations').fetchone()[0],
+                        duplicate_skips=db.execute('SELECT COALESCE(SUM(seen_count-1),0) FROM observations').fetchone()[0])
