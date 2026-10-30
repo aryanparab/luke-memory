@@ -1,0 +1,11 @@
+node_modules/
+.venv/
+.env
+.env.*
+!.env.example
+.data/
+.demo-data/
+__pycache__/
+*.pyc
+*.sqlite3*
+.DS_Store

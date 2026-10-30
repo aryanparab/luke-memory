@@ -1,0 +1,16 @@
+{
+  "name": "luke-memory",
+  "version": "0.1.0",
+  "description": "A focused desktop memory assistant: recall, summaries, search and lightweight tasks.",
+  "private": true,
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "capture": "LUKE_ALLOW_CAPTURE=1 electron .",
+    "check": "node --check desktop/main.cjs && node --check ui/app.js"
+  },
+  "devDependencies": {
+    "electron": "45.1.0"
+  },
+  "license": "MIT"
+}
