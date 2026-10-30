@@ -52,7 +52,9 @@ class CaptureTests(unittest.TestCase):
         self.observe()
         result, _ = self.observe(color='black', text='New meeting Monday at noon')
         self.assertEqual(result['source'], 'screen')
-        self.assertEqual(len(Store(self.store.path).memories()), 2)
+        self.assertEqual(len(Store(self.store.path).memories()), 1)
+        self.assertIn('Friday', Store(self.store.path).memories()[0]['content'])
+        self.assertIn('Monday', Store(self.store.path).memories()[0]['content'])
     def test_failed_extraction_retries_without_marking_seen(self):
         with patch.object(self.capture, 'screen_image', return_value=Image.new('RGB', (320,200))), patch('capture.extract_text', side_effect=RuntimeError('ocr failed')):
             with self.assertRaises(RuntimeError): self.capture.once()
@@ -76,3 +78,15 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(self.store.stats()['pending_compaction'], 4)
         self.assertEqual(self.store.stats()['compacted_records'], 0)
         self.assertIsNotNone(self.capture.compaction_error)
+
+    def test_open_screen_session_is_not_compacted_automatically(self):
+        self.observe()
+        self.assertEqual(self.store.uncompacted(include_active=False), [])
+        self.assertEqual(len(self.store.uncompacted()), 1)
+
+    def test_compaction_rejects_stale_screen_snapshot(self):
+        record, _ = self.observe()
+        self.observe(color='black', text='Another important detail')
+        with self.assertRaises(RuntimeError):
+            self.store.save_summary('Outdated summary', [record])
+        self.assertEqual(self.store.stats()['compacted_records'], 0)

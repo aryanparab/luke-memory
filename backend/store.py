@@ -19,7 +19,10 @@ class Store:
                 CREATE TABLE IF NOT EXISTS memories (
                     id TEXT PRIMARY KEY, created_at TEXT NOT NULL, title TEXT NOT NULL,
                     content TEXT NOT NULL, source TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS memories_source_date ON memories(source,created_at);
                 CREATE VIRTUAL TABLE IF NOT EXISTS memory_search USING fts5(id UNINDEXED, title, content);
+                CREATE TABLE IF NOT EXISTS capture_batches (
+                    bucket INTEGER PRIMARY KEY, memory_id TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS observations (
                     fingerprint TEXT PRIMARY KEY, memory_id TEXT, last_seen TEXT NOT NULL,
                     seen_count INTEGER NOT NULL DEFAULT 1);
@@ -92,17 +95,22 @@ class Store:
             db.execute('INSERT OR IGNORE INTO observations(fingerprint,memory_id,last_seen) VALUES (?,?,?)',
                        (fingerprint, memory_id, now()))
 
-    def uncompacted(self, limit=20):
+    def uncompacted(self, limit=20, include_active=True):
         with self.connect() as db:
             return [dict(row) for row in db.execute("""SELECT m.* FROM memories m
                 LEFT JOIN summary_inputs s ON s.memory_id=m.id
                 WHERE s.memory_id IS NULL AND m.source!='summary'
-                ORDER BY m.created_at ASC LIMIT ?""", (limit,))]
+                AND (? OR m.id NOT IN (SELECT memory_id FROM capture_batches WHERE bucket=?))
+                ORDER BY m.created_at ASC LIMIT ?""", (include_active, int(datetime.now(timezone.utc).timestamp()) // 300, limit))]
 
     def save_summary(self, text, records):
         # Summary and input coverage commit together; originals remain available.
         record = dict(id=uuid.uuid4().hex, created_at=now(), title='Memory summary', content=text, source='summary')
         with self.connect() as db:
+            for row in records:
+                current = db.execute('SELECT content FROM memories WHERE id=?', (row['id'],)).fetchone()
+                if not current or current['content'] != row['content']:
+                    raise RuntimeError('A memory changed during compaction; retry with the latest content')
             db.execute('INSERT INTO memories VALUES (:id,:created_at,:title,:content,:source)', record)
             db.execute('INSERT INTO memory_search VALUES (:id,:title,:content)', record)
             for row in records:
@@ -129,3 +137,57 @@ class Store:
                         pending_compaction=db.execute("SELECT COUNT(*) FROM memories WHERE source!='summary' AND id NOT IN (SELECT memory_id FROM summary_inputs)").fetchone()[0],
                         observations=db.execute('SELECT COUNT(*) FROM observations').fetchone()[0],
                         duplicate_skips=db.execute('SELECT COALESCE(SUM(seen_count-1),0) FROM observations').fetchone()[0])
+
+    def add_screen_observation(self, content):
+        """One growing evidence record per five-minute interval, not per screenshot."""
+        bucket = int(datetime.now(timezone.utc).timestamp()) // 300
+        with self.connect() as db:
+            row = db.execute('SELECT m.* FROM capture_batches b JOIN memories m ON m.id=b.memory_id WHERE b.bucket=?', (bucket,)).fetchone()
+            if row:
+                record = dict(row)
+                existing = set(record['content'].splitlines())
+                added = [line for line in content.splitlines() if line.strip() and line not in existing]
+                if not added:
+                    return record
+                merged = record['content'] + '\n' + '\n'.join(added)
+                if len(merged) <= 12000:
+                    record['content'] = merged
+                    db.execute('UPDATE memories SET content=? WHERE id=?', (merged, record['id']))
+                    db.execute('DELETE FROM memory_search WHERE id=?', (record['id'],))
+                    db.execute('INSERT INTO memory_search VALUES (:id,:title,:content)', record)
+                    db.execute('DELETE FROM summary_inputs WHERE memory_id=?', (record['id'],))
+                    return record
+            record = dict(id=uuid.uuid4().hex, created_at=now(), title='Screen session', content=content[:12000], source='screen')
+            db.execute('INSERT INTO memories VALUES (:id,:created_at,:title,:content,:source)', record)
+            db.execute('INSERT INTO memory_search VALUES (:id,:title,:content)', record)
+            db.execute('INSERT OR REPLACE INTO capture_batches VALUES (?,?)', (bucket, record['id']))
+            return record
+
+    def memory_cards(self, query='', limit=40):
+        """Curated view: explicit notes and one digest per local day.
+
+        Raw records remain available to retrieval and the optional activity view.
+        """
+        if query.strip():
+            return self.memories(query, limit)
+        with self.connect() as db:
+            notes = [dict(row) for row in db.execute("SELECT * FROM memories WHERE source='note' ORDER BY created_at DESC LIMIT ?", (limit,))]
+            rows = db.execute("""SELECT * FROM memories WHERE source='summary'
+                AND date(created_at,'localtime') IN (SELECT DISTINCT date(created_at,'localtime')
+                    FROM memories WHERE source='summary' ORDER BY 1 DESC LIMIT ?)
+                ORDER BY created_at ASC""", (limit,))
+            days = {}
+            for row in rows:
+                day = datetime.fromisoformat(row['created_at']).astimezone().date().isoformat()
+                card = days.setdefault(day, dict(id='digest-'+day, created_at=row['created_at'], title='Daily digest · '+day,
+                                                content='', source='digest', record_count=0))
+                card['created_at'] = row['created_at']
+                card['record_count'] += 1
+                card['content'] += ('\n\n' if card['content'] else '') + row['content']
+                if len(card['content']) > 12000:
+                    card['content'] = 'Earlier details remain searchable in raw activity.\n\n' + card['content'][-11500:]
+            return sorted(notes + list(days.values()), key=lambda card: card['created_at'], reverse=True)[:limit]
+
+    def card_count(self):
+        with self.connect() as db:
+            return db.execute("SELECT (SELECT COUNT(*) FROM memories WHERE source='note') + (SELECT COUNT(DISTINCT date(created_at,'localtime')) FROM memories WHERE source='summary')").fetchone()[0]

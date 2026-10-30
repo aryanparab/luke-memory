@@ -50,7 +50,7 @@ def create_app(data_dir=None, models=None):
                        capture_allowed=capture_allowed, capture_error=capture.error,
                        provider=models.provider, text_model=models.text_model,
                        extractor=capture.extractor, last_observation=capture.last_observation,
-                       compaction_error=capture.compaction_error, **store.stats())
+                       compaction_error=capture.compaction_error, card_count=store.card_count(), **store.stats())
 
     def text_field(data, name, maximum):
         value = data.get(name)
@@ -64,7 +64,9 @@ def create_app(data_dir=None, models=None):
 
     @app.get('/api/memories')
     def memories():
-        return jsonify(memories=store.memories(request.args.get('q', '')[:500]))
+        query = request.args.get('q', '')[:500]
+        records = store.memories(query) if request.args.get('view') == 'activity' else store.memory_cards(query)
+        return jsonify(memories=records)
 
     @app.post('/api/memories')
     def add_memory():
@@ -132,7 +134,10 @@ def create_app(data_dir=None, models=None):
             # Keep only references actually emitted, with their original marker numbers.
             used_sources = [dict(source, number=i+1) for i, source in enumerate(sources) if i+1 in cited]
             store.add_message('assistant', answer, used_sources)
-            store.add_memory('Conversation · ' + question[:100], 'User: ' + question + '\nLuke (assistant response): ' + answer, 'conversation')
+            # Keep every turn in history, but only declarations and explicit save requests in recall memory.
+            meaningful = bool(re.search(r'\b(remember|decided|agreed|deadline|my .{1,60} (is|are)|i (will|need|prefer|am)|we (will|need|are))\b', question, re.I))
+            if not greeting and meaningful:
+                store.add_memory('Conversation note · ' + question[:100], 'User stated: ' + question, 'conversation')
             threading.Thread(target=capture.compact_if_due, daemon=True).start()
             return jsonify(answer=answer, sources=used_sources)
         finally:

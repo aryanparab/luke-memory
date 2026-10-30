@@ -105,3 +105,33 @@ class MemoryTests(unittest.TestCase):
         with patch.object(self.models, 'chat', return_value='I do not have that detail.'):
             result = self.post('/api/chat', {'message':'unknown fact'})
         self.assertEqual(result.json['sources'], [])
+
+    def test_curated_memories_group_daily_summaries_and_keep_raw_search(self):
+        store = self.app.extensions['memory_store']
+        note = self.note()
+        screen = store.add_memory('Screen observation', 'Orchid technical decision', 'screen')
+        store.save_summary('Orchid decision recap', [screen])
+        other = store.add_memory('Later observation', 'Follow up with the team', 'screen')
+        store.save_summary('Team follow up recap', [other])
+        cards = self.get('/api/memories').json['memories']
+        self.assertEqual(len(cards), 2)
+        digest = next(row for row in cards if row['source']=='digest')
+        self.assertEqual(digest['record_count'], 2)
+        self.assertIn('Orchid', digest['content'])
+        self.assertIn('Team', digest['content'])
+        self.assertEqual(store.card_count(), 2)
+        self.assertEqual(len(self.get('/api/memories?view=activity').json['memories']), 5)
+        self.assertTrue(self.get('/api/memories?q=Orchid').json['memories'])
+
+    def test_smalltalk_does_not_create_memory_cards(self):
+        self.post('/api/chat', {'message':'Hi'})
+        self.post('/api/chat', {'message':'How are you?'})
+        self.assertEqual(len(self.get('/api/chat/history').json['messages']), 4)
+        self.assertEqual(self.get('/api/status').json['memory_count'], 0)
+        self.assertEqual(self.get('/api/memories').json['memories'], [])
+
+    def test_explicit_user_fact_is_saved_without_assistant_duplication(self):
+        self.post('/api/chat', {'message':'Remember that my project is Orchid'})
+        records = self.app.extensions['memory_store'].memories()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['content'], 'User stated: Remember that my project is Orchid')

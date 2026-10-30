@@ -17,26 +17,30 @@ This is a focused continuation of the collaborative Luke-os project. See
 - **Desktop companion:** click the floating widget to chat; click away or press
   Escape to tuck chat away. Cmd/Ctrl+Shift+Space toggles chat from any app. Drag
   the widget to reposition it; its position is remembered across launches.
-- **Memory desk (optional library):** a light workspace with timestamped cards, source filters,
-  readable long memories, and a focused note editor.
+- **Memories:** explicit notes and one digest per local day, with no growing
+  navigation badge. Raw screen and chat evidence stays available through search
+  and the optional **Show raw activity** view.
 - **Search:** SQLite FTS5 retrieval across saved titles and memory content.
 - **Text agent with memory:** ordinary conversation works without saved records.
   Chat turns persist in SQLite and recent turns are restored after restart. Relevant
   records ground personal recall; only cited records appear under an answer.
   Reference markers are model-generated, not independently verified citations.
 - **Compaction:** summarize new records on demand. Collection checks about every
-  two minutes and completed chats also trigger compaction once four records are
-  pending. Each summary tracks its covered inputs atomically, preventing repeated
-  summarization of the same batch. Original records and the full chat transcript
+  two minutes. Completed chats also trigger compaction once four records are
+  pending; smaller batches become eligible after five minutes. Active screen
+  sessions wait until their five-minute interval has closed. Each summary tracks
+  its covered inputs atomically, preventing repeated summarization of the same batch. Original records and the full chat transcript
   remain available; this reduces prompt context, not disk storage.
 - **Tasks:** add a task, mark it complete by stable ID, and see the pending count.
 - **Quick navigation:** Cmd/Ctrl+K focuses search; Cmd/Ctrl+N opens a new note.
   The layout adapts to narrow windows, and recall chat shows a pending response state.
 - **Optional screen memory:** macOS Vision OCR extracts primary-screen text locally
-  every 30 seconds, without a vision LLM. Durable pixel hashes skip identical
-  screens across restarts; a visual-difference check tolerates tiny changes, and
+  every 30 seconds, without a vision LLM. New text merges into five-minute
+  session records, with an overflow record if a session exceeds 12,000 characters.
+  Durable pixel hashes skip identical screens across restarts; a visual-difference check tolerates tiny changes, and
   normalized text hashes suppress repeated extracted text. Raw images are transient.
-  The quick panel shows collection status, memory count and duplicate skips.
+  The quick panel shows a stable collection status. Duplicate counters are kept
+  in diagnostics rather than turning every observation into a visible notification.
 
 There are no stress scores, webcam/emotion analysis, clipboard interception,
 keyboard/mouse tracking, productivity scoring, focus enforcement, voice coaching,
@@ -138,10 +142,10 @@ public backend.
 npm run check
 ```
 
-Twenty Python regressions cover persistence, conversation restoration, follow-up
+Twenty-five Python regressions cover persistence, conversation restoration, follow-up
 context, source filtering, task IDs, extraction retries, exact/near/text duplicate
-suppression, duplicate detection after restart, compaction input coverage and
-failure recovery, validation and local request restrictions. Four Node tests cover
+suppression, duplicate detection after restart, compaction input coverage, screen-session batching, stale-summary protection,
+curated daily digests, small-talk filtering and failure recovery, validation and local request restrictions. Four Node tests cover
 widget placement across monitor boundaries. Automated capture tests use generated
 images and fake extractors, never private screen contents. A separate native OCR
 fixture verifies Apple's text recognition on generated text.

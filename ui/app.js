@@ -13,8 +13,8 @@ function element(tag, text, className) { const node = document.createElement(tag
 function time(value) { return new Date(value).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
 async function loadMemories() {
   const query = $('search').value.trim();
-  const data = await api('/api/memories?q=' + encodeURIComponent(query));
-  const memories = data.memories.filter(memory => sourceFilter === 'all' || memory.source === sourceFilter);
+  const data = await api('/api/memories?view=' + (sourceFilter==='screen'?'activity':'curated') + '&q=' + encodeURIComponent(query));
+  const memories = data.memories.filter(memory => sourceFilter === 'all' || memory.source === sourceFilter || (sourceFilter==='summary' && memory.source==='digest'));
   $('memories').replaceChildren();
   $('timeline-heading').textContent = query ? 'SEARCH RESULTS' : 'RECENT MEMORIES';
   $('memory-count').textContent = `${memories.length} ${memories.length === 1 ? "memory" : "memories"}`;
@@ -26,7 +26,7 @@ async function loadMemories() {
   }
   for (const memory of memories) {
     const article = element('article', '', 'memory source-' + memory.source); article.id = 'memory-' + memory.id; const meta = element('div', '', 'record-meta');
-    meta.append(element('span', ({note:'↗ NOTE', screen:'▣ SCREEN', summary:'✧ SUMMARY'})[memory.source] || memory.source.toUpperCase()), element('time', time(memory.created_at)));
+    meta.append(element('span', ({note:'↗ NOTE', screen:'▣ SCREEN', summary:'✧ SUMMARY',digest:'✧ DAILY DIGEST'})[memory.source] || memory.source.toUpperCase()), element('time', time(memory.created_at)));
     article.append(meta, element('h3', memory.title));
     if (memory.content.length > 400) { const detail = element('details', '', 'memory-detail'); detail.append(element('summary', 'Read full memory'), element('p', memory.content)); article.append(element('p', memory.content.slice(0, 220) + '…'), detail); } else article.append(element('p', memory.content)); $('memories').append(article);
   }
